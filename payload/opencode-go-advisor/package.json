@@ -1,0 +1,7 @@
+{
+  "name": "opencode-go-advisor",
+  "version": "1.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Motor de actualizacion y recomendacion de modelos para OpenCode Go"
+}

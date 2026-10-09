@@ -53,13 +53,15 @@ const cfg = arg("--target") || path.join(base, "opencode");
 
 log(`Node:   ${process.execPath} (${process.version})`);
 log(`Destino: ${cfg}`);
-// Preservar el espejo configurado en una instalación previa si no se pasa --mirror.
-let carriedMirror = null;
+// Heredar espejo y origen de una instalación previa si no se pasan explícitamente.
+let prevMarker = {};
 try {
-  carriedMirror = JSON.parse(fs.readFileSync(path.join(cfg, "opencode-go-advisor", "data", "installed.json"), "utf8")).mirror ?? null;
+  prevMarker = JSON.parse(fs.readFileSync(path.join(cfg, "opencode-go-advisor", "data", "installed.json"), "utf8"));
 } catch {}
-const effMirror = mirror || carriedMirror;
-if (effMirror) log(`Espejo del informe: ${path.resolve(effMirror)}${!mirror && carriedMirror ? " (heredado)" : ""}`);
+const effMirror = mirror || prevMarker.mirror || null;
+const effSource = sourceArg || prevMarker.source || null;
+if (effMirror) log(`Espejo del informe: ${path.resolve(effMirror)}${!mirror && prevMarker.mirror ? " (heredado)" : ""}`);
+if (effSource) log(`Origen configurado: ${effSource}${!sourceArg && prevMarker.source ? " (heredado)" : ""}`);
 
 if (dryRun) {
   log("dry-run: no se modifica nada. Este es el plan de instalación.");
@@ -127,7 +129,7 @@ try {
     version: pkg.version ?? "0.0.0",
     installedAt: new Date().toISOString(),
     sourceDir: here,
-    source: sourceArg,
+    source: effSource,
     mirror: effMirror ? path.resolve(effMirror) : null,
   };
   fs.writeFileSync(path.join(cfg, "opencode-go-advisor", "data", "installed.json"), JSON.stringify(marker, null, 2) + "\n");

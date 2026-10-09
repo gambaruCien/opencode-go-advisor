@@ -1,4 +1,16 @@
-# OpenCode Go Advisor
+<div align="center">
+
+<img src="assets/banner.svg" alt="OpenCode Go Advisor" width="100%">
+
+<br/>
+
+[![License](https://img.shields.io/badge/license-MIT-22d3a6?style=flat-square)](./LICENSE)
+[![Version](https://img.shields.io/badge/version-1.2.0-5b8def?style=flat-square)](./CHANGELOG.md)
+[![Node](https://img.shields.io/badge/node-%E2%89%A518-brightgreen?style=flat-square)](https://nodejs.org)
+[![OpenCode](https://img.shields.io/badge/OpenCode-V2-black?style=flat-square)](https://opencode.ai)
+[![MCP](https://img.shields.io/badge/MCP-sin%20dependencias-orange?style=flat-square)](#)
+
+</div>
 
 **Elegí el mejor modelo de OpenCode Go para cada tarea —con la variante de esfuerzo correcta— sin adivinar.** El catálogo se mantiene actualizado solo desde la documentación oficial.
 

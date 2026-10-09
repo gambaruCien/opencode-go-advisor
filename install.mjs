@@ -30,6 +30,7 @@ const arg = (n, d = null) => {
 const has = (n) => argv.includes(n);
 
 const mirror = arg("--mirror");
+const sourceArg = arg("--source") || process.env.OPENCODE_GO_ADVISOR_SOURCE || null;
 const skipMcp = has("--no-mcp");
 const forceMcp = has("--force-mcp");
 const dryRun = has("--dry-run");
@@ -91,6 +92,17 @@ function copyFile(src, dest) {
 
 // --- 1) Motor -------------------------------------------------------------
 copyTree(path.join(payload, "opencode-go-advisor"), path.join(cfg, "opencode-go-advisor"));
+// Copiar el actualizador al motor instalado (para auto-update y uso offline).
+try {
+  const updaterSrc = path.join(here, "update.mjs");
+  if (fs.existsSync(updaterSrc)) {
+    ensureDir(path.join(cfg, "opencode-go-advisor"));
+    fs.copyFileSync(updaterSrc, path.join(cfg, "opencode-go-advisor", "update.mjs"));
+    log("→ opencode-go-advisor/update.mjs");
+  }
+} catch (e) {
+  warn(`No pude copiar update.mjs: ${e.message}`);
+}
 // Regenerar datos locales (paths absolutos incluidos en el catalogo son irrelevantes, pero limpiamos).
 fs.rmSync(path.join(cfg, "opencode-go-advisor", "data"), { recursive: true, force: true });
 fs.rmSync(path.join(cfg, "opencode-go-advisor", "report"), { recursive: true, force: true });
@@ -115,7 +127,7 @@ try {
     version: pkg.version ?? "0.0.0",
     installedAt: new Date().toISOString(),
     sourceDir: here,
-    source: process.env.OPENCODE_GO_ADVISOR_SOURCE || null,
+    source: sourceArg,
     mirror: effMirror ? path.resolve(effMirror) : null,
   };
   fs.writeFileSync(path.join(cfg, "opencode-go-advisor", "data", "installed.json"), JSON.stringify(marker, null, 2) + "\n");

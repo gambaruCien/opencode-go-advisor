@@ -1,14 +1,13 @@
 #!/usr/bin/env node
 // mcp-server.mjs — Servidor MCP local "opencode-go-advisor".
-// Expone herramientas para elegir el mejor modelo de OpenCode Go.
-// Protocolo MCP por stdio: los logs van a stderr, nunca a stdout.
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+// Implementacion SIN dependencias (JSON-RPC sobre stdio). Solo requiere Node >= 18.
+// Los logs van a stderr; stdout es exclusivo del protocolo.
 import { readCatalog, refresh, CATALOG_PATH } from './lib/refresh-core.mjs';
 import { recommend, bestHighVolume, listModels, modelDetail, catalogStatus } from './lib/recommend.mjs';
 
-const log = (...a) => console.error('[opencode-go-advisor]', ...a);
+const NAME = 'opencode-go-advisor';
+const VERSION = '1.2.0';
+const log = (...a) => console.error(`[${NAME}]`, ...a);
 const MAX_AGE_DAYS = Number(process.env.OPENCODE_GO_ADVISOR_MAX_AGE_DAYS || 7);
 
 let refreshing = null;
@@ -108,112 +107,169 @@ const TOOLS = [
   },
 ];
 
-const server = new Server(
-  { name: 'opencode-go-advisor', version: '1.0.0' },
-  { capabilities: { tools: {} } },
-);
+async function callTool(name, args = {}) {
+  if (name === 'refresh_catalog') {
+    await ensureCatalog({ force: true });
+    const summary = await refresh({ quiet: true });
+    const text = [
+      `Catálogo actualizado: ${summary.generatedAt}`,
+      `Modelos: ${summary.models} (${summary.live} vivos).`,
+      `Nuevos: ${summary.added.join(', ') || 'ninguno'}`,
+      `Quitados: ${summary.removed.join(', ') || 'ninguno'}`,
+      `Modificados: ${summary.changed.map((c) => `${c.name} (${c.deltas.join('; ')})`).join(' | ') || 'ninguno'}`,
+      `Informe: ${summary.reportPath}`,
+    ].join('\n');
+    return { content: [{ type: 'text', text }] };
+  }
 
-server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
+  const cat = await ensureCatalog({});
 
-server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  const { name, arguments: args = {} } = request.params;
+  if (name === 'catalog_status') {
+    const st = catalogStatus(cat, MAX_AGE_DAYS);
+    return { content: [{ type: 'text', text: JSON.stringify({ ...st, catalogPath: CATALOG_PATH }, null, 2) }] };
+  }
+
+  if (name === 'recommend_model') {
+    const res = recommend(cat, {
+      task: args.task,
+      plan: args.plan,
+      priority: args.priority,
+      needsVision: bool(args.needs_vision),
+      needsAudio: bool(args.needs_audio),
+      minContext: num(args.min_context) ?? undefined,
+      minReq5h: num(args.min_req_5h),
+      excludeDataTraining: bool(args.exclude_data_training, false),
+      limit: Math.min(Math.max(num(args.limit) ?? 5, 1), 10),
+    });
+    const head = `Tarea interpretada como: **${res.interpretedAs.join(', ')}** · plan **${res.plan}** · prioridad **${res.priority}**\n`;
+    const body = res.recommendations.map((r, i) => fmtRec({ ...r, rank: i + 1 })).join('\n\n');
+    return { content: [{ type: 'text', text: head + '\n' + (body || 'Sin candidatos con esos filtros.') }] };
+  }
+
+  if (name === 'best_high_volume') {
+    const res = bestHighVolume(cat, {
+      plan: args.plan,
+      minReq5h: num(args.min_req_5h) ?? 6000,
+      excludeDataTraining: bool(args.exclude_data_training, false),
+    });
+    const lines = [];
+    if (res.winner) {
+      lines.push(`# Mejor del set ${res.minReq5h}+ req/5h (plan ${res.plan})`);
+      lines.push('');
+      lines.push(`**${res.winner.name}** (\`${res.winner.ref}\`)${res.winner.free ? ' — gratis' : ''}${res.winner.trainsData ? ' ⚠️ entrena con tus datos' : ''}`);
+      lines.push(`- Lab: ${res.winner.lab} · Req/5h: ${res.winner.req5h} · Límite: ${res.winner.monthlyLimit != null ? '$' + res.winner.monthlyLimit : 'ilimitado'}`);
+      if (res.winner.bestFor?.length) lines.push(`- Mejor para: ${res.winner.bestFor.join('; ')}`);
+      if (res.winner.effort) lines.push(`- Esfuerzo: ${res.winner.effort.modes} · ${res.winner.effort.recommend}`);
+      if (res.winner.why) lines.push(`- Por qué: ${res.winner.why}`);
+      lines.push(`- Excluye entrena-datos: ${res.excludedDataTraining}`);
+      lines.push('- Nota: los modelos marcados con ⚠️ usan tus prompts/respuestas para entrenar.');
+      lines.push('');
+      lines.push('## Ranking del set');
+    } else {
+      lines.push('No hay candidatos con ese umbral/filtros.');
+    }
+    for (const r of res.ranking) {
+      lines.push(`${r.rank}. **${r.name}** — ${r.req5h} req/5h · ${r.monthlyLimit != null ? '$' + r.monthlyLimit : 'ilimitado'}${r.free ? ' · gratis' : ''}${r.trainsData ? ' · ⚠️ entrena' : ''}${r.ref ? ` · \`${r.ref}\`` : ''}`);
+    }
+    return { content: [{ type: 'text', text: lines.join('\n') }] };
+  }
+
+  if (name === 'list_models') {
+    const rows = listModels(cat, {
+      plan: args.plan,
+      minReq5h: num(args.min_req_5h),
+      freeOnly: bool(args.free_only, false),
+      needsVision: bool(args.needs_vision, false),
+      excludeDataTraining: bool(args.exclude_data_training, false),
+      onlyLive: bool(args.only_live, false),
+    });
+    const head = '| Modelo | Ref | Lab | Calidad | Límite Go | Req/5h Go | Req/5h Go+ | Datos |\n| --- | --- | --- | --- | --- | --- | --- | --- |';
+    const body = rows
+      .map((m) => `| ${m.name} | \`${m.ref}\` | ${m.lab ?? '?'} | ${m.quality ?? '?'} | ${m.limitGo != null ? '$' + m.limitGo : m.free ? 'gratis' : '?'} | ${m.req5hGo ?? '?'} | ${m.req5hGoPlus ?? '?'} | ${m.trainsData ? '⚠️ entrena' : 'ok'} |`)
+      .join('\n');
+    return { content: [{ type: 'text', text: `${rows.length} modelos.\n\n${head}\n${body}` }] };
+  }
+
+  if (name === 'model_detail') {
+    const res = modelDetail(cat, args.query);
+    if (!res.found) return { content: [{ type: 'text', text: `No encontrado: ${args.query}\nDisponibles: ${res.available.join(', ')}` }] };
+    return { content: [{ type: 'text', text: JSON.stringify(res.model, null, 2) }] };
+  }
+
+  return { content: [{ type: 'text', text: `Herramienta desconocida: ${name}` }], isError: true };
+}
+
+// --- Transporte JSON-RPC sobre stdio (sin dependencias) --------------------
+function send(obj) {
+  try { process.stdout.write(JSON.stringify(obj) + '\n'); } catch { /* stdout cerrado */ }
+}
+const reply = (id, result) => send({ jsonrpc: '2.0', id, result });
+const replyError = (id, code, message) => send({ jsonrpc: '2.0', id, error: { code, message } });
+
+async function handleMessage(msg) {
+  if (!msg || typeof msg !== 'object') return;
+  const { id, method, params } = msg;
+  const isNotification = id === undefined || id === null;
+
   try {
-    if (name === 'refresh_catalog') {
-      await ensureCatalog({ force: true });
-      const summary = await refresh({ quiet: true });
-      const text = [
-        `Catálogo actualizado: ${summary.generatedAt}`,
-        `Modelos: ${summary.models} (${summary.live} vivos).`,
-        `Nuevos: ${summary.added.join(', ') || 'ninguno'}`,
-        `Quitados: ${summary.removed.join(', ') || 'ninguno'}`,
-        `Modificados: ${summary.changed.map((c) => `${c.name} (${c.deltas.join('; ')})`).join(' | ') || 'ninguno'}`,
-        `Informe: ${summary.reportPath}`,
-      ].join('\n');
-      return { content: [{ type: 'text', text }] };
-    }
-
-    const cat = await ensureCatalog({});
-
-    if (name === 'catalog_status') {
-      const st = catalogStatus(cat, MAX_AGE_DAYS);
-      return { content: [{ type: 'text', text: JSON.stringify({ ...st, catalogPath: CATALOG_PATH }, null, 2) }] };
-    }
-
-    if (name === 'recommend_model') {
-      const res = recommend(cat, {
-        task: args.task,
-        plan: args.plan,
-        priority: args.priority,
-        needsVision: bool(args.needs_vision),
-        needsAudio: bool(args.needs_audio),
-        minContext: num(args.min_context) ?? undefined,
-        minReq5h: num(args.min_req_5h),
-        excludeDataTraining: bool(args.exclude_data_training, false),
-        limit: Math.min(Math.max(num(args.limit) ?? 5, 1), 10),
-      });
-      const head = `Tarea interpretada como: **${res.interpretedAs.join(', ')}** · plan **${res.plan}** · prioridad **${res.priority}**\n`;
-      const body = res.recommendations.map((r, i) => fmtRec({ ...r, rank: i + 1 })).join('\n\n');
-      return { content: [{ type: 'text', text: head + '\n' + (body || 'Sin candidatos con esos filtros.') }] };
-    }
-
-    if (name === 'best_high_volume') {
-      const res = bestHighVolume(cat, {
-        plan: args.plan,
-        minReq5h: num(args.min_req_5h) ?? 6000,
-        excludeDataTraining: bool(args.exclude_data_training, false),
-      });
-      const lines = [];
-      if (res.winner) {
-        lines.push(`# Mejor del set ${res.minReq5h}+ req/5h (plan ${res.plan})`);
-        lines.push('');
-        lines.push(`**${res.winner.name}** (\`${res.winner.ref}\`)${res.winner.free ? ' — gratis' : ''}${res.winner.trainsData ? ' ⚠️ entrena con tus datos' : ''}`);
-        lines.push(`- Lab: ${res.winner.lab} · Req/5h: ${res.winner.req5h} · Límite: ${res.winner.monthlyLimit != null ? '$' + res.winner.monthlyLimit : 'ilimitado'}`);
-        if (res.winner.bestFor?.length) lines.push(`- Mejor para: ${res.winner.bestFor.join('; ')}`);
-        if (res.winner.effort) lines.push(`- Esfuerzo: ${res.winner.effort.modes} · ${res.winner.effort.recommend}`);
-        if (res.winner.why) lines.push(`- Por qué: ${res.winner.why}`);
-        lines.push(`- Excluye entrena-datos: ${res.excludedDataTraining}`);
-        lines.push('- Nota: los modelos marcados con ⚠️ usan tus prompts/respuestas para entrenar.');
-        lines.push('');
-        lines.push('## Ranking del set');
-      } else {
-        lines.push('No hay candidatos con ese umbral/filtros.');
+    switch (method) {
+      case 'initialize':
+        reply(id, {
+          protocolVersion: params?.protocolVersion ?? '2024-11-05',
+          capabilities: { tools: {} },
+          serverInfo: { name: NAME, version: VERSION },
+        });
+        return;
+      case 'notifications/initialized':
+      case 'initialized':
+      case 'notifications/cancelled':
+        return; // notificaciones: sin respuesta
+      case 'ping':
+        reply(id, {});
+        return;
+      case 'tools/list':
+        reply(id, { tools: TOOLS });
+        return;
+      case 'tools/call': {
+        const result = await callTool(params?.name, params?.arguments ?? {});
+        reply(id, result);
+        return;
       }
-      for (const r of res.ranking) {
-        lines.push(`${r.rank}. **${r.name}** — ${r.req5h} req/5h · ${r.monthlyLimit != null ? '$' + r.monthlyLimit : 'ilimitado'}${r.free ? ' · gratis' : ''}${r.trainsData ? ' · ⚠️ entrena' : ''}${r.ref ? ` · \`${r.ref}\`` : ''}`);
-      }
-      return { content: [{ type: 'text', text: lines.join('\n') }] };
+      default:
+        if (isNotification) return;
+        replyError(id, -32601, `Method not found: ${method}`);
     }
-
-    if (name === 'list_models') {
-      const rows = listModels(cat, {
-        plan: args.plan,
-        minReq5h: num(args.min_req_5h),
-        freeOnly: bool(args.free_only, false),
-        needsVision: bool(args.needs_vision, false),
-        excludeDataTraining: bool(args.exclude_data_training, false),
-        onlyLive: bool(args.only_live, false),
-      });
-      const head = '| Modelo | Ref | Lab | Calidad | Límite Go | Req/5h Go | Req/5h Go+ | Datos |\n| --- | --- | --- | --- | --- | --- | --- | --- |';
-      const body = rows
-        .map((m) => `| ${m.name} | \`${m.ref}\` | ${m.lab ?? '?'} | ${m.quality ?? '?'} | ${m.limitGo != null ? '$' + m.limitGo : m.free ? 'gratis' : '?'} | ${m.req5hGo ?? '?'} | ${m.req5hGoPlus ?? '?'} | ${m.trainsData ? '⚠️ entrena' : 'ok'} |`)
-        .join('\n');
-      return { content: [{ type: 'text', text: `${rows.length} modelos.\n\n${head}\n${body}` }] };
-    }
-
-    if (name === 'model_detail') {
-      const res = modelDetail(cat, args.query);
-      if (!res.found) return { content: [{ type: 'text', text: `No encontrado: ${args.query}\nDisponibles: ${res.available.join(', ')}` }] };
-      const m = res.model;
-      return { content: [{ type: 'text', text: JSON.stringify(m, null, 2) }] };
-    }
-
-    return { content: [{ type: 'text', text: `Herramienta desconocida: ${name}` }], isError: true };
   } catch (err) {
-    log('Error en herramienta', name, err);
-    return { content: [{ type: 'text', text: `Error: ${err.message}` }], isError: true };
+    log('Error:', err?.message ?? err);
+    if (!isNotification) replyError(id, -32603, String(err?.message ?? err));
+  }
+}
+
+let buffer = '';
+const pending = new Set();
+process.stdin.setEncoding('utf8');
+process.stdin.on('data', (chunk) => {
+  buffer += chunk;
+  let idx;
+  while ((idx = buffer.indexOf('\n')) >= 0) {
+    const line = buffer.slice(0, idx).replace(/\r$/, '').trim();
+    buffer = buffer.slice(idx + 1);
+    if (!line) continue;
+    let msg;
+    try {
+      msg = JSON.parse(line);
+    } catch {
+      continue; // linea no-JSON: ignorar
+    }
+    const p = handleMessage(msg)
+      .catch(() => {})
+      .finally(() => pending.delete(p));
+    pending.add(p);
   }
 });
+// Al cerrarse stdin, esperar las operaciones en curso antes de salir.
+process.stdin.on('end', () => {
+  Promise.all([...pending]).finally(() => process.exit(0));
+});
 
-const transport = new StdioServerTransport();
-await server.connect(transport);
-log('Servidor MCP listo.');
+log(`Servidor MCP ${VERSION} listo (sin dependencias).`);

@@ -1,104 +1,96 @@
-# Instalador — OpenCode Go Advisor
+# OpenCode Go Advisor
 
-Paquete portable para instalar el asesor de modelos de OpenCode Go en cualquier PC con OpenCode.
+**Elegí el mejor modelo de OpenCode Go para cada tarea —con la variante de esfuerzo correcta— sin adivinar.** El catálogo se mantiene actualizado solo desde la documentación oficial.
 
-## Qué instala
+> Pensado para quienes usan el plan **OpenCode Go** ($10) o **Go Plus** ($40).
 
-| Componente | Destino |
-| --- | --- |
-| Motor (catálogo + recomendador) | `<config>/opencode-go-advisor/` |
-| Plugin de barra de estado | `<config>/plugins/opencode-go-status/` |
-| Skill | `<config>/skills/opencode-go-advisor/` |
-| Agente `model-advisor` | `<config>/agents/model-advisor.md` |
-| Comando `/mejor-modelo` | `<config>/commands/mejor-modelo.md` |
-| MCP `opencode-go-advisor` + `context7` | `opencode.jsonc` global |
+## Qué hace
 
-`<config>` es `%USERPROFILE%\.config\opencode` (Windows) o `~/.config/opencode` (Linux/macOS),
-o `$XDG_CONFIG_HOME/opencode` si está definido.
+- **Catálogo auto-actualizable**: modelos, precios, límites mensuales, peticiones estimadas por 5 h y políticas de privacidad, parseados de la doc oficial.
+- **Recomendador por tarea**: le decís qué vas a hacer (frontend, refactor, debugging, visión, seguridad, ofimática…) y te devuelve el modelo + variante.
+- **Barra de estado en vivo** en la TUI: muestra el modelo recomendado para tu último prompt y si el actual coincide.
+- **Tecla `ctrl+alt+v`**: aplica la variante recomendada al modelo actual.
+- **MCP, skill, agente y comando** listos para usar desde el chat.
 
 ## Requisitos
 
-- **Node.js ≥ 18** (probado en 22). El instalador usa el mismo `node` con el que se ejecuta.
-- **OpenCode** en el `PATH` (para registrar los MCP). Si no está, el instalador te deja los comandos a mano.
+- **OpenCode V2**
+- **Node.js ≥ 18**
+- **git** (solo para la actualización automática)
+
+## Instalación
+
+### Opción A — un comando (recomendada)
+
+```sh
+npx github:gambaruCien/opencode-go-advisor
+```
+
+Copia los componentes a tu config global de OpenCode, registra el MCP y genera el catálogo.
+
+### Opción B — clonar
+
+```sh
+git clone https://github.com/gambaruCien/opencode-go-advisor
+cd opencode-go-advisor
+node install.mjs
+```
+
+**Después reiniciá OpenCode.** Verificá:
+
+```sh
+opencode plugin list   # debe listar "opencode-go.status"
+opencode mcp list      # debe listar "opencode-go-advisor"
+```
 
 ## Uso
 
-Desde esta carpeta:
+| Forma | Cómo |
+| --- | --- |
+| Barra de estado | `⚡ Go · <modelo>` o `⚡ sug: <modelo>#<variante>` (marca ⚠ si entrena con tus datos) |
+| Comando | `/mejor-modelo refactor grande de un monorepo` |
+| Tecla | `ctrl+alt+v` aplica la variante recomendada |
+| Lenguaje natural | "¿qué modelo me conviene para analizar capturas de pantalla?" |
+| MCP | `recommend_model`, `best_high_volume`, `list_models`, `model_detail`, `refresh_catalog`, `catalog_status` |
+
+## Actualización
+
+- **Datos** (modelos, precios, límites): **automático** (el MCP refresca a los 7 días; el plugin también en segundo plano).
+- **Motor** (lógica, plugin, skill): 
 
 ```sh
-# Instalación normal
-node install.mjs
-
-# Con espejo del informe en una carpeta tuya
-node install.mjs --mirror "C:/dev/modelos/informe-opencode-go.md"
-
-# Solo copiar archivos, sin tocar la config de MCP
-node install.mjs --no-mcp
-
-# Ver el plan sin instalar nada
-node install.mjs --dry-run
-
-# Re-registrar los MCP aunque ya existan
-node install.mjs --force-mcp
+node update.mjs --source https://github.com/gambaruCien/opencode-go-advisor.git
 ```
 
-> Re-ejecutar el instalador es **seguro e idempotente**:
-> - `opencode-go-advisor` se **re-registra siempre** (corrige las rutas absolutas de esta máquina).
-> - `context7` se **preserva** si ya existe (mantiene el login OAuth salvo que uses `--force-mcp`).
-> - Los archivos se copian y sobreescriben; los datos generados se regeneran.
-
-## Después de instalar
-
-1. **Reiniciá OpenCode.**
-2. Verificá:
-   ```sh
-   opencode plugin list     # debe listar "opencode-go.status"
-   opencode mcp list        # debe listar "opencode-go-advisor" y "context7"
-   ```
-3. Si `context7` pide autenticación, corré `/mcps` en la TUI y completá el login.
-4. En la TUI:
-   - `/mejor-modelo <tarea>` para una recomendación completa;
-   - tecla **`ctrl+alt+v`** para aplicar la variante recomendada;
-   - la **barra de estado** del prompt muestra el modelo recomendado (marca ⚠ si entrena con tus datos).
-
-## Llevarlo a otra PC
-
-1. Copiá esta carpeta completa (`opencode-go-advisor-install/`) a la otra PC.
-2. Asegurate de tener Node y OpenCode.
-3. `node install.mjs` (opcional `--mirror <ruta>`).
-4. Reiniciá OpenCode.
-
-El instalador detecta las rutas y usa el `node` y la carpeta de config de esa máquina, así que no hay que
-editar JSON a mano.
-
-## Actualizar en el futuro
-
-Los **datos** (modelos, precios, límites) se **auto-refrescan**. Para el **motor/editorial**:
+Para que se actualice **solo**, definí el origen y olvidate:
 
 ```sh
-# Re-instala el payload local y refresca los datos
-node update.mjs
-
-# Baja la última versión desde un origen Git/carpeta y la instala
-node update.mjs --source "https://github.com/usuario/opencode-go-advisor.git"
-
-# Solo comparar versiones
-node update.mjs --check
+# Windows
+setx OPENCODE_GO_ADVISOR_SOURCE "https://github.com/gambaruCien/opencode-go-advisor.git"
+# Linux/macOS (agregar a ~/.bashrc o ~/.zshrc)
+export OPENCODE_GO_ADVISOR_SOURCE="https://github.com/gambaruCien/opencode-go-advisor.git"
 ```
 
-Origen por defecto: variable de entorno `OPENCODE_GO_ADVISOR_SOURCE` (git URL o carpeta local).
+Con eso, el plugin ejecuta `update.mjs` en segundo plano cuando el motor supera los 14 días. Además, la barra muestra **`↻`** a los 30 días como recordatorio.
 
-### Automatización (para no olvidarte)
+## Desinstalar
 
-1. Publicá este bundle en un repo Git (por ejemplo GitHub).
-2. Definí `OPENCODE_GO_ADVISOR_SOURCE=<git-url>` en tu entorno.
-3. Con eso, el plugin de barra de estado **auto-actualiza** en segundo plano cuando el motor supera los 14 días.
-4. Aun sin origen configurado, la barra muestra **`↻`** cuando la instalación supera los **30 días**, como recordatorio.
+Borrá del config global (`~/.config/opencode` o `%USERPROFILE%\.config\opencode`):
 
-## Solución de problemas
+```
+opencode-go-advisor/          (motor)
+plugins/opencode-go-status/   (barra de estado)
+skills/opencode-go-advisor/   (skill)
+agents/model-advisor.md       (agente)
+commands/mejor-modelo.md      (comando)
+```
 
-- **La barra no aparece:** `opencode plugin list` debe listar `opencode-go.status`. Mirá
-  `<config>/opencode-go-advisor/data/plugin-server.json` (cargó el servidor) y `plugin-loaded.json` (cargó la TUI).
-- **El MCP no conecta:** revisá que la ruta de `mcp-server.mjs` en `opencode.jsonc` sea la correcta para esa PC
-  (el instalador la escribe por vos; si copiaste config de otra máquina, puede quedar vieja).
-- **Catálogo vacío:** corré `node "<config>/opencode-go-advisor/refresh.mjs"`.
+Y quitá las entradas `opencode-go-advisor` y `context7` de `mcp.servers` en `opencode.jsonc`.
+
+## Privacidad
+
+Los modelos **Muse Spark 1.3/1.2 Contributor** (de Meta) **entrenan con tus prompts y respuestas** a cambio de precios muy bajos. Se incluyen en las recomendaciones pero se marcan con **⚠️**. No los uses con código propietario ni datos sensibles.
+
+## Licencia
+
+MIT — ver [LICENSE](./LICENSE).

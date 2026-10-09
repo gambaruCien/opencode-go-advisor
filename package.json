@@ -1,0 +1,32 @@
+{
+  "name": "opencode-go-advisor",
+  "version": "1.2.0",
+  "description": "Catálogo auto-actualizable y recomendador del mejor modelo de OpenCode Go para cada tarea (con la variante de esfuerzo correcta).",
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "opencode-go-advisor": "./install.mjs"
+  },
+  "files": [
+    "install.mjs",
+    "update.mjs",
+    "payload",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "setup": "node install.mjs",
+    "update": "node update.mjs",
+    "check": "node update.mjs --check"
+  },
+  "keywords": [
+    "opencode",
+    "opencode-go",
+    "mcp",
+    "model-selection",
+    "ai-agents"
+  ]
+}

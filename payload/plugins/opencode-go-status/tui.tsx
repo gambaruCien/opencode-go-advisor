@@ -129,10 +129,10 @@ export default Plugin.define({
 
     // Estado de instalacion (para recordatorio y auto-update).
     let engineStale = false
-    let sourceDir: string | null = null
+    let installedSource: string | null = null
     try {
       const inst = JSON.parse(readFileSync(path.join(ADVISOR_DIR, "data", "installed.json"), "utf8"))
-      sourceDir = inst.sourceDir ?? null
+      installedSource = inst.source ?? null
       if (inst.installedAt) {
         engineStale = (Date.now() - new Date(inst.installedAt).getTime()) / 86400000 > 30
       }
@@ -142,14 +142,20 @@ export default Plugin.define({
 
     // Mantenimiento en segundo plano: actualiza el motor (si hay origen) o refresca datos.
     const maybeMaintain = () => {
-      const source = process.env.OPENCODE_GO_ADVISOR_SOURCE
-      if (source && sourceDir) {
-        const updater = path.join(sourceDir, "update.mjs")
+      const source = process.env.OPENCODE_GO_ADVISOR_SOURCE || installedSource
+      if (source) {
+        const updater = path.join(ADVISOR_DIR, "update.mjs")
         try {
-          const inst = JSON.parse(readFileSync(path.join(ADVISOR_DIR, "data", "installed.json"), "utf8"))
-          const age = inst?.installedAt ? (Date.now() - new Date(inst.installedAt).getTime()) / 86400000 : 999
+          const age = (() => {
+            try {
+              const inst = JSON.parse(readFileSync(path.join(ADVISOR_DIR, "data", "installed.json"), "utf8"))
+              return inst?.installedAt ? (Date.now() - new Date(inst.installedAt).getTime()) / 86400000 : 999
+            } catch {
+              return 999
+            }
+          })()
           if (existsSync(updater) && age > 14) {
-            spawn(process.execPath, [updater, "--source", source], { detached: true, stdio: "ignore", windowsHide: true }).unref()
+            spawn(process.execPath, [updater], { detached: true, stdio: "ignore", windowsHide: true }).unref()
             return
           }
         } catch {
